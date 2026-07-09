@@ -27,7 +27,7 @@ public final class BluetoothControllerDetector {
     private let selector: ControllerSelector
     private let runLoop: CFRunLoop
 
-    public init(selector: ControllerSelector) throws {
+    public init(selector: ControllerSelector) {
         self.selector = selector
         runLoop = CFRunLoopGetMain()
         manager = IOHIDManagerCreate(
@@ -35,10 +35,9 @@ public final class BluetoothControllerDetector {
             IOOptionBits(kIOHIDOptionsTypeNone)
         )
         IOHIDManagerSetDeviceMatching(manager, nil)
-        let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        guard result == kIOReturnSuccess else {
-            throw MonitorError.hidManagerOpen(result)
-        }
+        // Device enumeration does not require opening every HID device.
+        // IOHIDManagerOpen is intentionally avoided because macOS denies it
+        // to background LaunchAgents without Input Monitoring permission.
         // Scheduling keeps IOHIDManager's device set current when a controller
         // connects or disconnects after the program has started.
         IOHIDManagerScheduleWithRunLoop(
@@ -54,7 +53,6 @@ public final class BluetoothControllerDetector {
             runLoop,
             CFRunLoopMode.commonModes.rawValue
         )
-        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
     }
 
     public func isConnected() -> Bool {
@@ -137,16 +135,5 @@ public struct CemuProcessFinder {
         )
         guard bytes == MemoryLayout<proc_bsdinfo>.size else { return nil }
         return info.pbi_status == UInt32(SSTOP)
-    }
-}
-
-public enum MonitorError: LocalizedError {
-    case hidManagerOpen(IOReturn)
-
-    public var errorDescription: String? {
-        switch self {
-        case let .hidManagerOpen(code):
-            return "无法打开 HID 管理器（IOKit 错误 \(code)）"
-        }
     }
 }

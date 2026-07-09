@@ -103,8 +103,8 @@ private final class Monitor {
     private var lastConnected: Bool?
     private var lastPIDs: Set<pid_t> = []
 
-    init(options: Options) throws {
-        detector = try BluetoothControllerDetector(selector: ControllerSelector(
+    init(options: Options) {
+        detector = BluetoothControllerDetector(selector: ControllerSelector(
             name: options.controllerName,
             vendorID: options.vendorID,
             productID: options.productID,
@@ -188,7 +188,7 @@ private func log(_ message: String) {
 
 do {
     let options = try Options.parse(Array(CommandLine.arguments.dropFirst()))
-    let monitor = try Monitor(options: options)
+    let monitor = Monitor(options: options)
     monitor.tick()
 
     if options.once {
