@@ -25,7 +25,7 @@ make build
 .build/release/auto-pause-cemu --any-gamepad
 ```
 
-使用 `--help` 查看名称、VID/PID、检查间隔及 Cemu 进程匹配选项。
+使用 `--help` 查看检查间隔、任意蓝牙手柄模式及维护命令。
 
 ## 登录后自动运行
 

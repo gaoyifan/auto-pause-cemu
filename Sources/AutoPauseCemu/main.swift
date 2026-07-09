@@ -3,54 +3,33 @@ import Darwin
 import Foundation
 
 private struct Options {
+    enum Mode { case monitor, report, resume }
+
     var interval: TimeInterval = 2
-    var controllerName = "DualSense Wireless Controller"
-    var vendorID = 0x054c
-    var productID = 0x0ce6
     var anyGamepad = false
-    var cemuBundleID = "info.cemu.Cemu"
-    var cemuExecutable = "Cemu"
-    var once = false
-    var resumeManaged = false
+    var mode = Mode.monitor
     var verbose = false
 
     static func parse(_ arguments: [String]) throws -> Options {
         var result = Options()
-        var index = 0
+        var arguments = arguments[...]
 
-        func value(after option: String) throws -> String {
-            guard index + 1 < arguments.count else {
-                throw CLIError("\(option) 缺少参数")
-            }
-            index += 1
-            return arguments[index]
-        }
-
-        while index < arguments.count {
-            let argument = arguments[index]
+        while let argument = arguments.popFirst() {
             switch argument {
             case "--interval":
-                let text = try value(after: argument)
+                guard let text = arguments.popFirst() else {
+                    throw CLIError("--interval 缺少参数")
+                }
                 guard let seconds = Double(text), seconds >= 0.2 else {
                     throw CLIError("--interval 必须至少为 0.2 秒")
                 }
                 result.interval = seconds
-            case "--controller-name":
-                result.controllerName = try value(after: argument)
-            case "--vendor-id":
-                result.vendorID = try parseInteger(try value(after: argument), option: argument)
-            case "--product-id":
-                result.productID = try parseInteger(try value(after: argument), option: argument)
             case "--any-gamepad":
                 result.anyGamepad = true
-            case "--cemu-bundle-id":
-                result.cemuBundleID = try value(after: argument)
-            case "--cemu-executable":
-                result.cemuExecutable = try value(after: argument)
             case "--once":
-                result.once = true
+                result.mode = try result.mode.setting(.report)
             case "--resume-managed":
-                result.resumeManaged = true
+                result.mode = try result.mode.setting(.resume)
             case "--verbose":
                 result.verbose = true
             case "--help", "-h":
@@ -59,21 +38,17 @@ private struct Options {
             default:
                 throw CLIError("未知参数：\(argument)")
             }
-            index += 1
-        }
-        guard !(result.once && result.resumeManaged) else {
-            throw CLIError("--once 和 --resume-managed 不能同时使用")
         }
         return result
     }
+}
 
-    private static func parseInteger(_ text: String, option: String) throws -> Int {
-        let radix = text.lowercased().hasPrefix("0x") ? 16 : 10
-        let digits = radix == 16 ? String(text.dropFirst(2)) : text
-        guard let value = Int(digits, radix: radix) else {
-            throw CLIError("\(option) 不是有效整数：\(text)")
+private extension Options.Mode {
+    func setting(_ newMode: Self) throws -> Self {
+        guard self == .monitor else {
+            throw CLIError("--once 和 --resume-managed 不能同时使用")
         }
-        return value
+        return newMode
     }
 }
 
@@ -88,12 +63,7 @@ private func printHelp() {
     用法：auto-pause-cemu [选项]
 
       --interval 秒             检查间隔，默认 2 秒（最小 0.2）
-      --controller-name 名称    手柄名称，默认 DualSense Wireless Controller
-      --vendor-id ID            USB vendor ID，默认 0x054c
-      --product-id ID           USB product ID，默认 0x0ce6
       --any-gamepad             任意已连接的蓝牙手柄都可恢复 Cemu
-      --cemu-bundle-id ID       Cemu bundle ID，默认 info.cemu.Cemu
-      --cemu-executable 名称    Cemu 可执行文件名，默认 Cemu
       --once                    只检测并报告一次，不发送信号
       --resume-managed          恢复状态文件中由本程序暂停的 Cemu 后退出
       --verbose                 输出每次检查结果
@@ -114,17 +84,9 @@ private final class Monitor {
     init(options: Options) {
         store = ManagedPIDStore()
         state = PauseState(managedPIDs: store.load())
-        detector = BluetoothControllerDetector(selector: ControllerSelector(
-            name: options.controllerName,
-            vendorID: options.vendorID,
-            productID: options.productID,
-            anyGamepad: options.anyGamepad
-        ))
-        finder = CemuProcessFinder(
-            bundleIdentifier: options.cemuBundleID,
-            executableName: options.cemuExecutable
-        )
-        reportOnly = options.once
+        detector = BluetoothControllerDetector(anyGamepad: options.anyGamepad)
+        finder = CemuProcessFinder()
+        reportOnly = options.mode == .report
         verbose = options.verbose
     }
 
@@ -210,14 +172,14 @@ do {
     let options = try Options.parse(Array(CommandLine.arguments.dropFirst()))
     let monitor = Monitor(options: options)
 
-    if options.resumeManaged {
+    if options.mode == .resume {
         monitor.shutdown()
         exit(0)
     }
 
     monitor.tick()
 
-    if options.once {
+    if options.mode == .report {
         exit(0)
     }
 

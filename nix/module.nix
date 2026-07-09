@@ -23,40 +23,10 @@ in {
       description = "Polling interval in seconds.";
     };
 
-    controllerName = mkOption {
-      type = types.str;
-      default = "DualSense Wireless Controller";
-      description = "Bluetooth HID product name that controls Cemu.";
-    };
-
-    vendorID = mkOption {
-      type = types.int;
-      default = 1356;
-      description = "Controller USB vendor ID.";
-    };
-
-    productID = mkOption {
-      type = types.int;
-      default = 3302;
-      description = "Controller USB product ID.";
-    };
-
     anyGamepad = mkOption {
       type = types.bool;
       default = false;
       description = "Treat any connected Bluetooth gamepad as the controller.";
-    };
-
-    cemuBundleID = mkOption {
-      type = types.str;
-      default = "info.cemu.Cemu";
-      description = "Bundle identifier used to find Cemu.";
-    };
-
-    cemuExecutable = mkOption {
-      type = types.str;
-      default = "Cemu";
-      description = "Executable name used to find Cemu.";
     };
   };
 
@@ -67,16 +37,6 @@ in {
           (lib.getExe cfg.package)
           "--interval"
           cfg.interval
-          "--controller-name"
-          cfg.controllerName
-          "--vendor-id"
-          (toString cfg.vendorID)
-          "--product-id"
-          (toString cfg.productID)
-          "--cemu-bundle-id"
-          cfg.cemuBundleID
-          "--cemu-executable"
-          cfg.cemuExecutable
         ]
         ++ lib.optional cfg.anyGamepad "--any-gamepad";
       RunAtLoad = true;

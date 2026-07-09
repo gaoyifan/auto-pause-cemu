@@ -3,32 +3,13 @@ import Darwin
 import Foundation
 import IOKit.hid
 
-public struct ControllerSelector: Sendable {
-    public var name: String?
-    public var vendorID: Int?
-    public var productID: Int?
-    public var anyGamepad: Bool
-
-    public init(
-        name: String? = "DualSense Wireless Controller",
-        vendorID: Int? = 0x054c,
-        productID: Int? = 0x0ce6,
-        anyGamepad: Bool = false
-    ) {
-        self.name = name
-        self.vendorID = vendorID
-        self.productID = productID
-        self.anyGamepad = anyGamepad
-    }
-}
-
 public final class BluetoothControllerDetector {
     private let manager: IOHIDManager
-    private let selector: ControllerSelector
+    private let anyGamepad: Bool
     private let runLoop: CFRunLoop
 
-    public init(selector: ControllerSelector) {
-        self.selector = selector
+    public init(anyGamepad: Bool = false) {
+        self.anyGamepad = anyGamepad
         runLoop = CFRunLoopGetMain()
         manager = IOHIDManagerCreate(
             kCFAllocatorDefault,
@@ -68,26 +49,20 @@ public final class BluetoothControllerDetector {
             return false
         }
 
-        if selector.anyGamepad {
+        if anyGamepad {
             let page = intProperty(device, kIOHIDPrimaryUsagePageKey)
             let usage = intProperty(device, kIOHIDPrimaryUsageKey)
             return page == kHIDPage_GenericDesktop
                 && (usage == kHIDUsage_GD_GamePad || usage == kHIDUsage_GD_Joystick)
         }
 
-        if let expectedName = selector.name,
-           let actualName = stringProperty(device, kIOHIDProductKey),
-           actualName.caseInsensitiveCompare(expectedName) == .orderedSame {
+        if stringProperty(device, kIOHIDProductKey)?
+            .caseInsensitiveCompare("DualSense Wireless Controller") == .orderedSame {
             return true
         }
 
-        if let expectedVendor = selector.vendorID,
-           let expectedProduct = selector.productID {
-            return intProperty(device, kIOHIDVendorIDKey) == expectedVendor
-                && intProperty(device, kIOHIDProductIDKey) == expectedProduct
-        }
-
-        return false
+        return intProperty(device, kIOHIDVendorIDKey) == 0x054c
+            && intProperty(device, kIOHIDProductIDKey) == 0x0ce6
     }
 
     private func stringProperty(_ device: IOHIDDevice, _ key: String) -> String? {
@@ -100,22 +75,13 @@ public final class BluetoothControllerDetector {
 }
 
 public struct CemuProcessFinder {
-    public var bundleIdentifier: String
-    public var executableName: String
-
-    public init(
-        bundleIdentifier: String = "info.cemu.Cemu",
-        executableName: String = "Cemu"
-    ) {
-        self.bundleIdentifier = bundleIdentifier
-        self.executableName = executableName
-    }
+    public init() {}
 
     public func processes() -> [TargetProcess] {
         NSWorkspace.shared.runningApplications.compactMap { application in
-            let matchesBundle = application.bundleIdentifier == bundleIdentifier
+            let matchesBundle = application.bundleIdentifier == "info.cemu.Cemu"
             let matchesExecutable = application.executableURL?.lastPathComponent
-                .caseInsensitiveCompare(executableName) == .orderedSame
+                .caseInsensitiveCompare("Cemu") == .orderedSame
             guard matchesBundle || matchesExecutable else { return nil }
 
             let pid = application.processIdentifier
