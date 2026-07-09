@@ -1,0 +1,222 @@
+import AutoPauseCore
+import Darwin
+import Foundation
+
+private struct Options {
+    var interval: TimeInterval = 2
+    var controllerName = "DualSense Wireless Controller"
+    var vendorID = 0x054c
+    var productID = 0x0ce6
+    var anyGamepad = false
+    var cemuBundleID = "info.cemu.Cemu"
+    var cemuExecutable = "Cemu"
+    var once = false
+    var verbose = false
+
+    static func parse(_ arguments: [String]) throws -> Options {
+        var result = Options()
+        var index = 0
+
+        func value(after option: String) throws -> String {
+            guard index + 1 < arguments.count else {
+                throw CLIError("\(option) 缺少参数")
+            }
+            index += 1
+            return arguments[index]
+        }
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--interval":
+                let text = try value(after: argument)
+                guard let seconds = Double(text), seconds >= 0.2 else {
+                    throw CLIError("--interval 必须至少为 0.2 秒")
+                }
+                result.interval = seconds
+            case "--controller-name":
+                result.controllerName = try value(after: argument)
+            case "--vendor-id":
+                result.vendorID = try parseInteger(try value(after: argument), option: argument)
+            case "--product-id":
+                result.productID = try parseInteger(try value(after: argument), option: argument)
+            case "--any-gamepad":
+                result.anyGamepad = true
+            case "--cemu-bundle-id":
+                result.cemuBundleID = try value(after: argument)
+            case "--cemu-executable":
+                result.cemuExecutable = try value(after: argument)
+            case "--once":
+                result.once = true
+            case "--verbose":
+                result.verbose = true
+            case "--help", "-h":
+                printHelp()
+                exit(0)
+            default:
+                throw CLIError("未知参数：\(argument)")
+            }
+            index += 1
+        }
+        return result
+    }
+
+    private static func parseInteger(_ text: String, option: String) throws -> Int {
+        let radix = text.lowercased().hasPrefix("0x") ? 16 : 10
+        let digits = radix == 16 ? String(text.dropFirst(2)) : text
+        guard let value = Int(digits, radix: radix) else {
+            throw CLIError("\(option) 不是有效整数：\(text)")
+        }
+        return value
+    }
+}
+
+private struct CLIError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
+private func printHelp() {
+    print("""
+    用法：auto-pause-cemu [选项]
+
+      --interval 秒             检查间隔，默认 2 秒（最小 0.2）
+      --controller-name 名称    手柄名称，默认 DualSense Wireless Controller
+      --vendor-id ID            USB vendor ID，默认 0x054c
+      --product-id ID           USB product ID，默认 0x0ce6
+      --any-gamepad             任意已连接的蓝牙手柄都可恢复 Cemu
+      --cemu-bundle-id ID       Cemu bundle ID，默认 info.cemu.Cemu
+      --cemu-executable 名称    Cemu 可执行文件名，默认 Cemu
+      --once                    只检测并报告一次，不发送信号
+      --verbose                 输出每次检查结果
+      -h, --help                显示帮助
+    """)
+}
+
+private final class Monitor {
+    private let detector: BluetoothControllerDetector
+    private let finder: CemuProcessFinder
+    private let reportOnly: Bool
+    private let verbose: Bool
+    private var state = PauseState()
+    private var lastConnected: Bool?
+    private var lastPIDs: Set<pid_t> = []
+
+    init(options: Options) throws {
+        detector = try BluetoothControllerDetector(selector: ControllerSelector(
+            name: options.controllerName,
+            vendorID: options.vendorID,
+            productID: options.productID,
+            anyGamepad: options.anyGamepad
+        ))
+        finder = CemuProcessFinder(
+            bundleIdentifier: options.cemuBundleID,
+            executableName: options.cemuExecutable
+        )
+        reportOnly = options.once
+        verbose = options.verbose
+    }
+
+    func tick() {
+        let connected = detector.isConnected()
+        let processes = finder.processes()
+        let pids = Set(processes.map(\.pid))
+
+        if verbose || connected != lastConnected || pids != lastPIDs {
+            let controllerText = connected ? "已连接" : "未连接"
+            let processText = pids.isEmpty ? "未运行" : pids.sorted().map(String.init).joined(separator: ",")
+            log("手柄\(controllerText)；Cemu PID：\(processText)")
+        }
+        lastConnected = connected
+        lastPIDs = pids
+
+        guard !reportOnly else {
+            if !connected, !pids.isEmpty {
+                log("仅报告模式：正常运行时将暂停 Cemu")
+            }
+            return
+        }
+
+        state.reconcile(controllerConnected: connected, processes: processes) { [self] action in
+            perform(action)
+        }
+    }
+
+    func shutdown() {
+        let pids = Set(finder.processes().map(\.pid))
+        state.resumeAll(liveTargetPIDs: pids) { [self] action in
+            perform(action)
+        }
+    }
+
+    private func perform(_ action: ProcessAction) -> Bool {
+        let pid: pid_t
+        let signal: Int32
+        let verb: String
+        switch action {
+        case let .pause(value):
+            pid = value
+            signal = SIGSTOP
+            verb = "已暂停"
+        case let .resume(value):
+            pid = value
+            signal = SIGCONT
+            verb = "已恢复"
+        }
+
+        if kill(pid, signal) == 0 {
+            log("\(verb) Cemu（PID \(pid)）")
+            return true
+        }
+        log("无法向 Cemu（PID \(pid)）发送信号：\(String(cString: strerror(errno)))")
+        return false
+    }
+}
+
+private let timestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return formatter
+}()
+
+private func log(_ message: String) {
+    print("[\(timestampFormatter.string(from: Date()))] \(message)")
+    fflush(stdout)
+}
+
+do {
+    let options = try Options.parse(Array(CommandLine.arguments.dropFirst()))
+    let monitor = try Monitor(options: options)
+    monitor.tick()
+
+    if options.once {
+        exit(0)
+    }
+
+    log("开始监控；按 Ctrl-C 退出（退出前会恢复由本程序暂停的 Cemu）")
+
+    var signalSources: [DispatchSourceSignal] = []
+    for signalNumber in [SIGINT, SIGTERM, SIGHUP] {
+        signal(signalNumber, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
+        source.setEventHandler {
+            log("收到退出信号，正在清理")
+            monitor.shutdown()
+            exit(0)
+        }
+        source.resume()
+        signalSources.append(source)
+    }
+
+    let timer = Timer.scheduledTimer(withTimeInterval: options.interval, repeats: true) { _ in
+        monitor.tick()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    RunLoop.main.run()
+} catch {
+    fputs("错误：\(error.localizedDescription)\n", stderr)
+    fputs("使用 --help 查看帮助。\n", stderr)
+    exit(2)
+}
