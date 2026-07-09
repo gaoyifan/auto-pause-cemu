@@ -4,10 +4,15 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default-darwin";
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin/master";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
     self,
+    nix-darwin,
     nixpkgs,
     systems,
   }: let
@@ -72,5 +77,22 @@
     );
 
     darwinModules.default = import ./nix/module.nix {inherit self;};
+
+    # Instantiate the module so CI catches invalid nix-darwin service options,
+    # not just package build failures.
+    darwinConfigurations.ci = nix-darwin.lib.darwinSystem {
+      modules = [
+        self.darwinModules.default
+        {
+          nixpkgs.hostPlatform = "aarch64-darwin";
+          system = {
+            primaryUser = "ci";
+            stateVersion = 6;
+          };
+          users.users.ci.home = "/Users/ci";
+          services.auto-pause-cemu.enable = true;
+        }
+      ];
+    };
   };
 }

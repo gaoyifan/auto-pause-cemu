@@ -31,13 +31,13 @@ in {
 
     vendorID = mkOption {
       type = types.int;
-      default = 0 x054c;
+      default = 1356;
       description = "Controller USB vendor ID.";
     };
 
     productID = mkOption {
       type = types.int;
-      default = 0 x0ce6;
+      default = 3302;
       description = "Controller USB product ID.";
     };
 
