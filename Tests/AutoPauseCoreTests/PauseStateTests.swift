@@ -1,4 +1,5 @@
 import AutoPauseCore
+import Foundation
 import XCTest
 
 final class PauseStateTests: XCTestCase {
@@ -110,5 +111,20 @@ final class PauseStateTests: XCTestCase {
 
         XCTAssertEqual(actions, [.resume(42)])
         XCTAssertTrue(state.managedPIDs.isEmpty)
+    }
+
+    func testManagedPIDStoreRoundTripAndClear() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent("managed-pids.json")
+        let store = ManagedPIDStore(url: url)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try store.save([42, 43])
+        XCTAssertEqual(store.load(), [42, 43])
+
+        try store.save([])
+        XCTAssertTrue(store.load().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 }

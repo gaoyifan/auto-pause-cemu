@@ -11,6 +11,7 @@ private struct Options {
     var cemuBundleID = "info.cemu.Cemu"
     var cemuExecutable = "Cemu"
     var once = false
+    var resumeManaged = false
     var verbose = false
 
     static func parse(_ arguments: [String]) throws -> Options {
@@ -48,6 +49,8 @@ private struct Options {
                 result.cemuExecutable = try value(after: argument)
             case "--once":
                 result.once = true
+            case "--resume-managed":
+                result.resumeManaged = true
             case "--verbose":
                 result.verbose = true
             case "--help", "-h":
@@ -57,6 +60,9 @@ private struct Options {
                 throw CLIError("未知参数：\(argument)")
             }
             index += 1
+        }
+        guard !(result.once && result.resumeManaged) else {
+            throw CLIError("--once 和 --resume-managed 不能同时使用")
         }
         return result
     }
@@ -89,6 +95,7 @@ private func printHelp() {
       --cemu-bundle-id ID       Cemu bundle ID，默认 info.cemu.Cemu
       --cemu-executable 名称    Cemu 可执行文件名，默认 Cemu
       --once                    只检测并报告一次，不发送信号
+      --resume-managed          恢复状态文件中由本程序暂停的 Cemu 后退出
       --verbose                 输出每次检查结果
       -h, --help                显示帮助
     """)
@@ -99,11 +106,14 @@ private final class Monitor {
     private let finder: CemuProcessFinder
     private let reportOnly: Bool
     private let verbose: Bool
-    private var state = PauseState()
+    private let store: ManagedPIDStore
+    private var state: PauseState
     private var lastConnected: Bool?
     private var lastPIDs: Set<pid_t> = []
 
     init(options: Options) {
+        store = ManagedPIDStore()
+        state = PauseState(managedPIDs: store.load())
         detector = BluetoothControllerDetector(selector: ControllerSelector(
             name: options.controllerName,
             vendorID: options.vendorID,
@@ -141,6 +151,7 @@ private final class Monitor {
         state.reconcile(controllerConnected: connected, processes: processes) { [self] action in
             perform(action)
         }
+        persistState()
     }
 
     func shutdown() {
@@ -148,6 +159,7 @@ private final class Monitor {
         state.resumeAll(liveTargetPIDs: pids) { [self] action in
             perform(action)
         }
+        persistState()
     }
 
     private func perform(_ action: ProcessAction) -> Bool {
@@ -172,6 +184,14 @@ private final class Monitor {
         log("无法向 Cemu（PID \(pid)）发送信号：\(String(cString: strerror(errno)))")
         return false
     }
+
+    private func persistState() {
+        do {
+            try store.save(state.managedPIDs)
+        } catch {
+            log("无法保存暂停状态：\(error.localizedDescription)")
+        }
+    }
 }
 
 private let timestampFormatter: DateFormatter = {
@@ -189,6 +209,12 @@ private func log(_ message: String) {
 do {
     let options = try Options.parse(Array(CommandLine.arguments.dropFirst()))
     let monitor = Monitor(options: options)
+
+    if options.resumeManaged {
+        monitor.shutdown()
+        exit(0)
+    }
+
     monitor.tick()
 
     if options.once {

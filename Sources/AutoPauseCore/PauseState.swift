@@ -21,7 +21,9 @@ public enum ProcessAction: Equatable, Sendable {
 public struct PauseState: Sendable {
     public private(set) var managedPIDs: Set<pid_t> = []
 
-    public init() {}
+    public init(managedPIDs: Set<pid_t> = []) {
+        self.managedPIDs = managedPIDs
+    }
 
     public mutating func reconcile(
         controllerConnected: Bool,

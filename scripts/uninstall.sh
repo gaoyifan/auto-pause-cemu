@@ -5,6 +5,9 @@ agent="$HOME/Library/LaunchAgents/com.local.auto-pause-cemu.plist"
 install_dir="$HOME/Library/Application Support/AutoPauseCemu"
 
 launchctl bootout "gui/$UID/com.local.auto-pause-cemu" 2>/dev/null || true
+if [[ -x "$install_dir/auto-pause-cemu" ]]; then
+  "$install_dir/auto-pause-cemu" --resume-managed
+fi
 rm -f "$agent"
 rm -rf "$install_dir"
 print "已卸载 auto-pause-cemu"

@@ -73,4 +73,6 @@ nix build github:gaoyifan/auto-pause-cemu
 - 只把通过蓝牙连接的目标手柄算作“已连接”；USB 线连接不会触发恢复。
 - 只恢复本程序亲自暂停且仍然属于 Cemu 的 PID，不会恢复启动前已被其他工具暂停的 Cemu。
 - 收到 `SIGINT`、`SIGTERM` 或 `SIGHUP` 时，退出前恢复由本程序暂停的 Cemu。
+- 暂停所有权保存在 `~/Library/Application Support/AutoPauseCemu/managed-pids.json`；launchd 强制重启后，新实例仍能安全接管。
+- 卸载或手动 bootout 后，可运行 `auto-pause-cemu --resume-managed` 恢复状态文件中由本程序暂停的 Cemu。
 - `--once` 始终是只报告模式，防止一次性命令把 Cemu 留在暂停状态。
